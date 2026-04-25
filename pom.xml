@@ -14,16 +14,16 @@
         <module>shared-common</module>
         <module>portfolio-service</module>
         <module>compliance-service</module>
+        <module>order-service</module>
     </modules>
 
     <properties>
-        <maven.compiler.source>21</maven.compiler.source>
-        <maven.compiler.target>21</maven.compiler.target>
+        <maven.compiler.release>21</maven.compiler.release>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <jackson.version>2.17.1</jackson.version>
         <javalin.version>5.6.3</javalin.version>
         <slf4j.version>2.0.13</slf4j.version>
-        <sqlite.version>3.46.0.0</sqlite.version>
+        <h2.version>2.2.224</h2.version>
     </properties>
 
     <dependencyManagement>
@@ -49,9 +49,9 @@
                 <version>${slf4j.version}</version>
             </dependency>
             <dependency>
-                <groupId>org.xerial</groupId>
-                <artifactId>sqlite-jdbc</artifactId>
-                <version>${sqlite.version}</version>
+                <groupId>com.h2database</groupId>
+                <artifactId>h2</artifactId>
+                <version>${h2.version}</version>
             </dependency>
         </dependencies>
     </dependencyManagement>
@@ -64,8 +64,7 @@
                     <artifactId>maven-compiler-plugin</artifactId>
                     <version>3.11.0</version>
                     <configuration>
-                        <source>21</source>
-                        <target>21</target>
+                        <release>21</release>
                     </configuration>
                 </plugin>
             </plugins>

@@ -15,14 +15,13 @@ public class Main {
     private static final Logger log = LoggerFactory.getLogger(Main.class);
 
     public static void main(String[] args) {
-        String pmsUrl  = env("PMS_BASE_URL",  "http://localhost:8090/pms");
-        String dbPath  = env("DB_PATH",        "./portfolio.db");
-        int    port    = Integer.parseInt(env("PORT", "8082"));
+        String pmsUrl = env("PMS_BASE_URL", "http://localhost:8090/pms");
+        int    port   = Integer.parseInt(env("PORT", "8082"));
 
         log.info("Starting portfolio-service on port {} (PMS={})", port, pmsUrl);
 
         // Infrastructure
-        Database db = new Database(dbPath);
+        Database db = new Database();
         db.initSchema();
 
         PmsClient pms = new PmsClient(pmsUrl);
