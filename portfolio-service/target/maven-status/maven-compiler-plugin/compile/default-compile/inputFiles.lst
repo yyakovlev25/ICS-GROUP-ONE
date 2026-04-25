@@ -1,0 +1,8 @@
+/Users/jonasfrerker/Documents/GitHub/ICS-GROUP-ONE/portfolio-service/src/main/java/com/trading/portfolio/Main.java
+/Users/jonasfrerker/Documents/GitHub/ICS-GROUP-ONE/portfolio-service/src/main/java/com/trading/portfolio/controller/PortfolioController.java
+/Users/jonasfrerker/Documents/GitHub/ICS-GROUP-ONE/portfolio-service/src/main/java/com/trading/portfolio/repository/AccountRepository.java
+/Users/jonasfrerker/Documents/GitHub/ICS-GROUP-ONE/portfolio-service/src/main/java/com/trading/portfolio/model/Account.java
+/Users/jonasfrerker/Documents/GitHub/ICS-GROUP-ONE/portfolio-service/src/main/java/com/trading/portfolio/repository/HoldingRepository.java
+/Users/jonasfrerker/Documents/GitHub/ICS-GROUP-ONE/portfolio-service/src/main/java/com/trading/portfolio/model/Holding.java
+/Users/jonasfrerker/Documents/GitHub/ICS-GROUP-ONE/portfolio-service/src/main/java/com/trading/portfolio/db/Database.java
+/Users/jonasfrerker/Documents/GitHub/ICS-GROUP-ONE/portfolio-service/src/main/java/com/trading/portfolio/service/PortfolioService.java

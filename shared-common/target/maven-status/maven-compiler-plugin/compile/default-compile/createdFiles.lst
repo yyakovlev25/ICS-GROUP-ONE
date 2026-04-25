@@ -1,0 +1,6 @@
+com/trading/shared/util/JsonMapper.class
+com/trading/shared/dto/ComplianceCheckRequest.class
+com/trading/shared/client/PmsClient.class
+com/trading/shared/dto/OrderValidationRequest.class
+com/trading/shared/dto/OrderValidationResult.class
+com/trading/shared/dto/ComplianceCheckResult.class

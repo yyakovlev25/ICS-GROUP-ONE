@@ -1,0 +1,8 @@
+com/trading/portfolio/model/Holding.class
+com/trading/portfolio/repository/HoldingRepository.class
+com/trading/portfolio/controller/PortfolioController.class
+com/trading/portfolio/model/Account.class
+com/trading/portfolio/repository/AccountRepository.class
+com/trading/portfolio/db/Database.class
+com/trading/portfolio/Main.class
+com/trading/portfolio/service/PortfolioService.class
