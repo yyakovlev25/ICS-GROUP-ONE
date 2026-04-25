@@ -38,8 +38,6 @@ public class Main {
 
         Javalin app = Javalin.create(c -> c.showJavalinBanner = false).start(port);
 
-        app.get("/health", ctx -> ctx.json(Map.of("status", "UP", "service", "portfolio-service")));
-
         app.get("/api/portfolio", ctx -> ctx.json(BALANCES));
 
         app.get("/api/portfolio/{customerId}", ctx -> {
@@ -121,4 +119,3 @@ public class Main {
         return result;
     }
 }
-

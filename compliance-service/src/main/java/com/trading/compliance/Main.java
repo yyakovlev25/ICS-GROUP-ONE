@@ -31,8 +31,6 @@ public class Main {
 
         Javalin app = Javalin.create(c -> c.showJavalinBanner = false).start(port);
 
-        app.get("/health", ctx -> ctx.json(Map.of("status", "UP", "service", "compliance-service")));
-
         app.get("/api/compliance/instrument/{isin}", ctx -> {
             String isin = ctx.pathParam("isin");
             Map<String, Object> result = check(pms, isin);
@@ -126,4 +124,3 @@ public class Main {
         return result;
     }
 }
-
