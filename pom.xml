@@ -14,6 +14,8 @@
         <module>shared-common</module>
         <module>portfolio-service</module>
         <module>compliance-service</module>
+        <module>order-service</module>
+        <module>routing-service</module>
     </modules>
 
     <properties>

@@ -1,0 +1,39 @@
+Frontend:
+http://localhost:8080
+
+Portfolio - customer overview (Alice, EUR + GBP accounts):
+http://localhost:8082/api/portfolio/100001
+
+Portfolio - buy ok (10 x 100 EUR, Alice has 12000 EUR):
+http://localhost:8082/api/portfolio/100001/check/DE0005140008/10/100/EUR
+
+Portfolio - buy with CHF account (Bob has 100000 CHF):
+http://localhost:8082/api/portfolio/100002/check/DE0005140008/10/100/CHF
+
+Portfolio - insufficient funds:
+http://localhost:8082/api/portfolio/100001/check/DE0005140008/200/100/EUR
+
+Portfolio - customer BLOCKED:
+http://localhost:8082/api/portfolio/100004/check/DE0005140008/1/1/EUR
+
+Portfolio - spot rates:
+http://localhost:8082/api/spotrates
+
+Compliance - instrument ok:
+http://localhost:8084/api/compliance/instrument/DE0005140008
+
+Compliance - sanctioned:
+http://localhost:8084/api/compliance/instrument/US0000000001
+
+Compliance - risk too low (Alice LOW, instrument MEDIUM):
+http://localhost:8084/api/compliance/customer/100001/CH0038863350
+
+Compliance - approved (Carla HIGH):
+http://localhost:8084/api/compliance/customer/100003/DE0005140008
+
+Compliance - customer BLOCKED:
+http://localhost:8084/api/compliance/customer/100004/DE0005140008
+
+Routing - all routed orders:
+http://localhost:8086/api/orders
+

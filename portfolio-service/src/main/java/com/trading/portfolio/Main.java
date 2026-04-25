@@ -12,15 +12,24 @@ import java.util.Optional;
 /**
  * Portfolio service.
  *
- * All data comes from the PMS server (customer master data including
- * cash accounts and status). No local database.
+ * All customer data comes from PMS. Spot rates are hardcoded for
+ * currency conversion so orders can be placed in any account currency.
  *
  * REST endpoints:
  *   GET  /api/portfolio/{customerId}
- *   GET  /api/portfolio/{customerId}/check/{isin}/{quantity}/{price}
+ *   GET  /api/portfolio/{customerId}/check/{isin}/{quantity}/{price}/{currency}
+ *   GET  /api/spotrates
  *   POST /validate
  */
 public class Main {
+
+    /** Spot rates: how many EUR is 1 unit of the given currency worth */
+    static final Map<String, Double> SPOT_RATES_TO_EUR = Map.of(
+            "EUR", 1.0,
+            "USD", 0.85,
+            "CHF", 1.04,
+            "GBP", 1.17
+    );
 
     public static void main(String[] args) {
         String pmsUrl = System.getenv().getOrDefault("PMS_BASE_URL", "http://localhost:8090/pms");
@@ -29,18 +38,21 @@ public class Main {
 
         Javalin app = Javalin.create(c -> c.showJavalinBanner = false).start(port);
 
+        app.get("/api/spotrates", ctx -> ctx.json(SPOT_RATES_TO_EUR));
+
         app.get("/api/portfolio/{customerId}", ctx -> {
             String customerId = ctx.pathParam("customerId");
             Map<String, Object> body = customerOverview(pms, customerId);
             ctx.status(body.containsKey("error") ? 404 : 200).json(body);
         });
 
-        app.get("/api/portfolio/{customerId}/check/{isin}/{quantity}/{price}", ctx -> {
+        app.get("/api/portfolio/{customerId}/check/{isin}/{quantity}/{price}/{currency}", ctx -> {
             String customerId = ctx.pathParam("customerId");
             String isin       = ctx.pathParam("isin");
             double quantity   = Double.parseDouble(ctx.pathParam("quantity"));
             double price      = Double.parseDouble(ctx.pathParam("price"));
-            Map<String, Object> result = validate(pms, customerId, isin, quantity, price, "EUR");
+            String currency   = ctx.pathParam("currency");
+            Map<String, Object> result = validate(pms, customerId, isin, quantity, price, currency);
             ctx.status((boolean) result.get("valid") ? 200 : 422).json(result);
         });
 
@@ -78,7 +90,11 @@ public class Main {
         return overview;
     }
 
-    /** Validates a buy order using PMS customer data (status + cash accounts). */
+    /**
+     * Validates a buy order. The price is given in the selected currency.
+     * If the customer does not have an account in that currency, we try
+     * to convert from another account using spot rates.
+     */
     public static Map<String, Object> validate(PmsClient pms, String customerId,
                                                String isin, double quantity,
                                                double pricePerUnit, String currency) {
@@ -89,39 +105,58 @@ public class Main {
         result.put("pricePerUnit", pricePerUnit);
         result.put("currency", currency);
 
-        // 1. Customer must exist in PMS
         Optional<JsonNode> customerOpt = pms.getCustomer(customerId);
         if (customerOpt.isEmpty()) {
             return fail(result, "Customer " + customerId + " not found in PMS");
         }
         JsonNode customer = customerOpt.get();
 
-        // 2. Customer must be ACTIVE
         String status = textOrNull(customer, "status");
         result.put("customerStatus", status);
         if (!"ACTIVE".equalsIgnoreCase(status)) {
             return fail(result, "Customer " + customerId + " is " + status + ", trading not allowed");
         }
 
-        // 3. Find matching cash account by currency
-        double available = findCashBalance(customer, currency);
-        result.put("availableCash", available);
-        result.put("availableCurrency", currency);
+        double requiredInCurrency = quantity * pricePerUnit;
+        result.put("required", requiredInCurrency);
 
-        double required = quantity * pricePerUnit;
-        result.put("required", required);
-
-        if (available < required) {
-            return fail(result, "Insufficient cash: need " + required + " " + currency
-                    + ", available " + available + " " + currency);
+        // Try direct match first
+        double directBalance = findCashBalance(customer, currency);
+        if (directBalance >= requiredInCurrency) {
+            result.put("accountUsed", currency);
+            result.put("availableCash", directBalance);
+            result.put("valid", true);
+            result.put("errors", List.of());
+            return result;
         }
 
-        result.put("valid", true);
-        result.put("errors", List.of());
-        return result;
+        // Try converting from other accounts
+        double requiredInEur = toEur(requiredInCurrency, currency);
+        JsonNode accounts = customer.get("cashAccounts");
+        if (accounts != null && accounts.isArray()) {
+            for (JsonNode acc : accounts) {
+                String accCcy = acc.path("currency").asText("");
+                double accAmount = acc.path("amount").asDouble(0);
+                double accInEur = toEur(accAmount, accCcy);
+                if (accInEur >= requiredInEur) {
+                    double neededInAccCcy = fromEur(requiredInEur, accCcy);
+                    result.put("accountUsed", accCcy);
+                    result.put("availableCash", accAmount);
+                    result.put("convertedFrom", accCcy);
+                    result.put("spotRate", SPOT_RATES_TO_EUR.getOrDefault(accCcy, 1.0));
+                    result.put("amountInAccountCurrency", Math.round(neededInAccCcy * 100.0) / 100.0);
+                    result.put("valid", true);
+                    result.put("errors", List.of());
+                    return result;
+                }
+            }
+        }
+
+        result.put("availableCash", directBalance);
+        return fail(result, "Insufficient funds in any account to cover "
+                + requiredInCurrency + " " + currency);
     }
 
-    /** Finds the cash balance for a given currency from the PMS cashAccounts array. */
     static double findCashBalance(JsonNode customer, String currency) {
         JsonNode accounts = customer.get("cashAccounts");
         if (accounts == null || !accounts.isArray()) return 0.0;
@@ -131,6 +166,17 @@ public class Main {
             }
         }
         return 0.0;
+    }
+
+    /** Converts amount in the given currency to EUR. */
+    static double toEur(double amount, String currency) {
+        return amount * SPOT_RATES_TO_EUR.getOrDefault(currency.toUpperCase(), 1.0);
+    }
+
+    /** Converts EUR amount to the given currency. */
+    static double fromEur(double eurAmount, String currency) {
+        double rate = SPOT_RATES_TO_EUR.getOrDefault(currency.toUpperCase(), 1.0);
+        return (rate > 0) ? eurAmount / rate : eurAmount;
     }
 
     static String textOrNull(JsonNode node, String field) {

@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Trading Platform</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f5f5f5; color: #333; padding: 20px; }
+        h1 { margin-bottom: 20px; font-size: 24px; }
+        h2 { margin-bottom: 12px; font-size: 18px; color: #555; }
+        .container { max-width: 900px; margin: 0 auto; }
+        .card { background: #fff; border-radius: 8px; padding: 20px; margin-bottom: 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+        label { display: block; margin-bottom: 4px; font-weight: 600; font-size: 14px; }
+        select, input { width: 100%; padding: 8px 12px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px; margin-bottom: 12px; }
+        .row { display: flex; gap: 12px; }
+        .row > div { flex: 1; }
+        button { background: #4a90d9; color: #fff; border: none; padding: 10px 24px; border-radius: 4px; font-size: 14px; cursor: pointer; }
+        button:hover { background: #357abd; }
+        button:disabled { background: #999; cursor: not-allowed; }
+        .customer-info { background: #f9f9f9; padding: 12px; border-radius: 4px; margin-bottom: 12px; font-size: 13px; line-height: 1.8; }
+        .badge { display: inline-block; padding: 2px 8px; border-radius: 3px; font-size: 12px; font-weight: 600; }
+        .badge-active { background: #d4edda; color: #155724; }
+        .badge-blocked { background: #f8d7da; color: #721c24; }
+        .badge-low { background: #fff3cd; color: #856404; }
+        .badge-medium { background: #d1ecf1; color: #0c5460; }
+        .badge-high { background: #f8d7da; color: #721c24; }
+        .cash-accounts { margin-top: 6px; }
+        .cash-account { display: inline-block; background: #e8f4fd; padding: 4px 10px; border-radius: 4px; margin-right: 8px; font-size: 13px; cursor: pointer; border: 2px solid transparent; }
+        .cash-account:hover { border-color: #4a90d9; }
+        .cash-account.selected { border-color: #4a90d9; background: #cce5ff; }
+        #result { margin-top: 16px; padding: 16px; border-radius: 4px; display: none; }
+        #result.approved { display: block; background: #d4edda; border: 1px solid #c3e6cb; }
+        #result.rejected { display: block; background: #f8d7da; border: 1px solid #f5c6cb; }
+        #result h3 { margin-bottom: 8px; }
+        #result pre { background: rgba(0,0,0,0.05); padding: 8px; border-radius: 4px; font-size: 12px; overflow-x: auto; margin-top: 8px; }
+        .orders-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+        .orders-table th, .orders-table td { padding: 6px 10px; text-align: left; border-bottom: 1px solid #eee; }
+        .orders-table th { font-weight: 600; color: #555; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Trading Platform</h1>
+
+        <div class="card">
+            <h2>Place Order</h2>
+
+            <label>Customer</label>
+            <select id="customerSelect"><option value="">Loading...</option></select>
+
+            <div id="customerInfo" class="customer-info" style="display:none;"></div>
+
+            <label>Instrument (ISIN)</label>
+            <select id="isinSelect"><option value="">Loading...</option></select>
+
+            <div class="row">
+                <div>
+                    <label>Account / Currency</label>
+                    <select id="currencySelect"><option value="EUR">EUR</option></select>
+                </div>
+                <div>
+                    <label>Quantity</label>
+                    <input type="number" id="quantity" value="10" min="1">
+                </div>
+                <div>
+                    <label>Price per unit</label>
+                    <input type="number" id="price" value="100" min="0" step="0.01">
+                </div>
+            </div>
+
+            <button id="submitBtn" onclick="placeOrder()">Submit Order</button>
+            <div id="result"></div>
+        </div>
+
+        <div class="card">
+            <h2>Routed Orders</h2>
+            <div id="orderHistory"><em>No orders yet</em></div>
+        </div>
+    </div>
+
+    <script>
+        let currentCustomer = null;
+
+        async function loadCustomers() {
+            try {
+                const resp = await fetch('/api/customers');
+                const data = await resp.json();
+                const select = document.getElementById('customerSelect');
+                select.innerHTML = '<option value="">-- select customer --</option>';
+                data.forEach(c => {
+                    const id = c.externalCustomerNumber;
+                    select.innerHTML += `<option value="${id}">${id} - ${c.fullName || id} (${c.status})</option>`;
+                });
+            } catch (e) {
+                document.getElementById('customerSelect').innerHTML = '<option>PMS not reachable</option>';
+            }
+        }
+
+        async function loadInstruments() {
+            try {
+                const resp = await fetch('/api/instruments');
+                const data = await resp.json();
+                const select = document.getElementById('isinSelect');
+                select.innerHTML = '<option value="">-- select instrument --</option>';
+                data.forEach(i => {
+                    select.innerHTML += `<option value="${i.isin}">${i.isin} - ${i.name || i.isin}</option>`;
+                });
+            } catch (e) {
+                document.getElementById('isinSelect').innerHTML = '<option>PMS not reachable</option>';
+            }
+        }
+
+        document.getElementById('customerSelect').addEventListener('change', async function() {
+            const id = this.value;
+            const info = document.getElementById('customerInfo');
+            const ccySelect = document.getElementById('currencySelect');
+            if (!id) { info.style.display = 'none'; currentCustomer = null; return; }
+
+            try {
+                const resp = await fetch('/api/customer/' + id);
+                currentCustomer = await resp.json();
+                const c = currentCustomer;
+                const statusCls = (c.status || '').toLowerCase();
+                const riskCls = (c.riskProfile || '').toLowerCase();
+
+                let html = `<strong>${c.fullName}</strong> &nbsp;
+                    Status: <span class="badge badge-${statusCls}">${c.status}</span> &nbsp;
+                    Risk: <span class="badge badge-${riskCls}">${c.riskProfile}</span> &nbsp;
+                    Country: ${c.country || '?'}
+                    <div class="cash-accounts"><strong>Cash Accounts:</strong><br>`;
+
+                ccySelect.innerHTML = '';
+                if (c.cashAccounts) {
+                    c.cashAccounts.forEach((a, i) => {
+                        html += `<span class="cash-account">${a.amount.toLocaleString()} ${a.currency}</span>`;
+                        ccySelect.innerHTML += `<option value="${a.currency}">${a.currency} (${a.amount.toLocaleString()} available)</option>`;
+                    });
+                }
+                html += '</div>';
+                info.innerHTML = html;
+                info.style.display = 'block';
+            } catch (e) {
+                info.innerHTML = 'Could not load customer';
+                info.style.display = 'block';
+            }
+        });
+
+        async function placeOrder() {
+            const customerId = document.getElementById('customerSelect').value;
+            const isin       = document.getElementById('isinSelect').value;
+            const quantity   = parseFloat(document.getElementById('quantity').value);
+            const price      = parseFloat(document.getElementById('price').value);
+            const currency   = document.getElementById('currencySelect').value;
+
+            if (!customerId || !isin) { alert('Select customer and instrument'); return; }
+
+            const btn = document.getElementById('submitBtn');
+            btn.disabled = true; btn.textContent = 'Processing...';
+
+            try {
+                const resp = await fetch('/api/order', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ customerId, isin, quantity, pricePerUnit: price, currency })
+                });
+                const data = await resp.json();
+                const resultDiv = document.getElementById('result');
+                const approved = data.orderStatus === 'APPROVED';
+                resultDiv.className = approved ? 'approved' : 'rejected';
+
+                let html = `<h3>${approved ? '✅ Order Approved & Routed' : '❌ Order Rejected'}</h3>`;
+                if (data.rejectionReasons && data.rejectionReasons.length > 0) {
+                    html += '<ul>' + data.rejectionReasons.map(r => `<li>${r}</li>`).join('') + '</ul>';
+                }
+                if (approved && data.routingResult) {
+                    const r = data.routingResult;
+                    html += `<p>Order ID: <strong>${r.orderId || r.get && r.get('orderId')}</strong>
+                             | Broker: ${r.broker || ''} | Status: ${r.status || ''}</p>`;
+                }
+                html += `<details><summary>Full response</summary><pre>${JSON.stringify(data, null, 2)}</pre></details>`;
+                resultDiv.innerHTML = html;
+
+                loadOrderHistory();
+            } catch (e) {
+                const resultDiv = document.getElementById('result');
+                resultDiv.className = 'rejected';
+                resultDiv.innerHTML = `<h3>Error</h3><p>${e.message}</p>`;
+            } finally {
+                btn.disabled = false; btn.textContent = 'Submit Order';
+            }
+        }
+
+        async function loadOrderHistory() {
+            try {
+                const resp = await fetch('http://localhost:8086/api/orders');
+                const orders = await resp.json();
+                const div = document.getElementById('orderHistory');
+                if (orders.length === 0) { div.innerHTML = '<em>No orders yet</em>'; return; }
+                let html = `<table class="orders-table">
+                    <tr><th>Order ID</th><th>Customer</th><th>ISIN</th><th>Qty</th><th>Price</th><th>Currency</th><th>Broker</th><th>Status</th><th>Time</th></tr>`;
+                orders.forEach(o => {
+                    html += `<tr><td>${o.orderId}</td><td>${o.customerId}</td><td>${o.isin}</td>
+                        <td>${o.quantity}</td><td>${o.price}</td><td>${o.currency}</td>
+                        <td>${o.broker || ''}</td><td>${o.status}</td><td>${o.timestamp}</td></tr>`;
+                });
+                html += '</table>';
+                div.innerHTML = html;
+            } catch (e) { }
+        }
+
+        loadCustomers();
+        loadInstruments();
+        loadOrderHistory();
+    </script>
+</body>
+</html>
+
