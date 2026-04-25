@@ -45,21 +45,25 @@ Open **http://localhost:8080** in browser.
 ## What each service does
 
 ### order-service (:8080)
+
 - Serves web frontend
 - Proxies PMS data (customers, instruments) for the UI
 - Orchestrates: calls compliance + portfolio, then routing if both pass
 
 ### compliance-service (:8084)
+
 - Customer exists and is ACTIVE
 - Instrument exists and is not sanctioned
 - Customer risk profile >= instrument risk category (LOW < MEDIUM < HIGH)
 
 ### portfolio-service (:8082)
+
 - Customer exists and is ACTIVE
 - Cash account covers the order amount in the selected currency
 - If no direct currency match, converts via spot rates and tries other accounts
 
 ### routing-service (:8086)
+
 - Starts an embedded Apache Artemis broker on tcp://localhost:61616
 - Receives approved orders via POST /api/route
 - Sends each order as a JMS TextMessage to queue `orders.broker`
@@ -75,11 +79,11 @@ The frontend lets you pick which account to use. The portfolio-service
 converts between currencies using hardcoded spot rates:
 
 | Currency | Rate to EUR |
-|----------|------------|
-| EUR      | 1.00       |
-| USD      | 0.85       |
-| CHF      | 1.04       |
-| GBP      | 1.17       |
+| -------- | ----------- |
+| EUR      | 1.00        |
+| USD      | 0.85        |
+| CHF      | 1.04        |
+| GBP      | 1.17        |
 
 If the selected currency account has insufficient funds, the service
 automatically checks other accounts using these rates.
@@ -87,33 +91,37 @@ automatically checks other accounts using these rates.
 ## REST endpoints
 
 ### order-service (:8080)
-| Method | Path | Purpose |
-|--------|------|---------|
-| GET | `/` | Web frontend |
-| GET | `/api/customers` | All customers (PMS proxy) |
-| GET | `/api/instruments` | All instruments (PMS proxy) |
-| GET | `/api/customer/{id}` | Single customer (PMS proxy) |
-| POST | `/api/order` | Place order |
+
+| Method | Path                 | Purpose                     |
+| ------ | -------------------- | --------------------------- |
+| GET    | `/`                  | Web frontend                |
+| GET    | `/api/customers`     | All customers (PMS proxy)   |
+| GET    | `/api/instruments`   | All instruments (PMS proxy) |
+| GET    | `/api/customer/{id}` | Single customer (PMS proxy) |
+| POST   | `/api/order`         | Place order                 |
 
 ### portfolio-service (:8082)
-| Method | Path | Purpose |
-|--------|------|---------|
-| GET | `/api/portfolio/{customerId}` | Customer + cash accounts |
-| GET | `/api/portfolio/{id}/check/{isin}/{qty}/{price}/{currency}` | Validate order |
-| GET | `/api/spotrates` | Current spot rates |
+
+| Method | Path                                                        | Purpose                  |
+| ------ | ----------------------------------------------------------- | ------------------------ |
+| GET    | `/api/portfolio/{customerId}`                               | Customer + cash accounts |
+| GET    | `/api/portfolio/{id}/check/{isin}/{qty}/{price}/{currency}` | Validate order           |
+| GET    | `/api/spotrates`                                            | Current spot rates       |
 
 ### compliance-service (:8084)
-| Method | Path | Purpose |
-|--------|------|---------|
-| GET | `/api/compliance/instrument/{isin}` | Instrument check |
-| GET | `/api/compliance/customer/{customerId}/{isin}` | Full compliance check |
+
+| Method | Path                                           | Purpose               |
+| ------ | ---------------------------------------------- | --------------------- |
+| GET    | `/api/compliance/instrument/{isin}`            | Instrument check      |
+| GET    | `/api/compliance/customer/{customerId}/{isin}` | Full compliance check |
 
 ### routing-service (:8086)
-| Method | Path | Purpose |
-|--------|------|---------|
-| POST | `/api/route` | Route an order |
-| GET | `/api/orders` | All routed orders |
-| GET | `/api/orders/{id}` | Single order |
+
+| Method | Path               | Purpose           |
+| ------ | ------------------ | ----------------- |
+| POST   | `/api/route`       | Route an order    |
+| GET    | `/api/orders`      | All routed orders |
+| GET    | `/api/orders/{id}` | Single order      |
 
 ## Project layout
 
@@ -125,4 +133,3 @@ order-service/         Main.java + ServiceClient + Frontend
 routing-service/       Main.java + ArtemisBroker + OrderProducer + BrokerConsumer
 pms-1.0.0/             PMS server
 ```
-
