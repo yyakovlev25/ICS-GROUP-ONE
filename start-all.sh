@@ -6,6 +6,8 @@ BASE_DIR="$(cd "$(dirname "$0")" && pwd)"
 echo "=== Starting Trading Platform ==="
 echo ""
 
+chmod +x "$BASE_DIR/pms-1.0.0/bin/run.sh" 2>/dev/null
+
 # 1) PMS server
 echo "[1/5] Starting PMS server (:8090)..."
 cd "$BASE_DIR/pms-1.0.0"

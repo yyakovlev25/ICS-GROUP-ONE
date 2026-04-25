@@ -1,0 +1,41 @@
+@startuml context-map
+title Trading Platform – Context Map
+
+skinparam rectangle {
+    RoundCorner 15
+    BackgroundColor #eff5fb
+    BorderColor #4a90d9
+}
+skinparam database {
+    BackgroundColor #f9eff5
+    BorderColor #6d5869
+}
+skinparam queue {
+    BackgroundColor #fdfae2
+    BorderColor #856404
+}
+skinparam actor {
+    BackgroundColor #f1faf4
+}
+
+actor "User" as user
+
+rectangle "**Order Service**\n:8080\n\nFrontend + Orchestration" as OS #eff5fb
+rectangle "**Compliance Service**\n:8084\n\nSanctions, Risk Profile" as CS #eff5fb
+rectangle "**Portfolio Service**\n:8082\n\nCash Balance, Spot Rates" as PS #eff5fb
+rectangle "**Routing Service**\n:8086\n\nJMS Producer" as RS #eff5fb
+rectangle "**PMS Server**\n:8090\n\nCustomers, Instruments,\nRegulatory Data" as PMS #f9eff5
+queue "**Artemis**\norders.broker" as Q #fdfae2
+rectangle "**MockBroker-EU**\nJMS Consumer" as MB #f1faf4
+
+user --> OS : HTTP
+OS --> CS : "compliance\ncheck"
+OS --> PS : "portfolio\ncheck"
+OS --> RS : "route order"
+CS --> PMS : "customer +\ninstrument +\nregulatory"
+PS --> PMS : "customer +\ncash accounts"
+RS --> Q : "JMS message"
+Q --> MB : "consume"
+
+@enduml
+

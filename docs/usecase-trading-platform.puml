@@ -1,0 +1,64 @@
+@startuml usecase-trading-platform
+title Trading Platform – Use Case Diagram
+
+left to right direction
+
+actor "User" as user
+actor "PMS Server" as pms
+actor "MockBroker-EU" as broker
+
+rectangle "Order Service (:8080)" {
+    usecase "Browse customers" as UC1
+    usecase "Browse instruments" as UC2
+    usecase "View customer details" as UC3
+    usecase "Place order" as UC4
+    usecase "View order history" as UC5
+}
+
+rectangle "Compliance Service (:8084)" {
+    usecase "Check customer status" as UC6
+    usecase "Check instrument sanctions" as UC7
+    usecase "Check risk profile\nvs risk category" as UC8
+}
+
+rectangle "Portfolio Service (:8082)" {
+    usecase "Check customer status" as UC9
+    usecase "Check cash balance" as UC10
+    usecase "Convert currency\nvia spot rates" as UC11
+}
+
+rectangle "Routing Service (:8086)" {
+    usecase "Route order via JMS" as UC12
+    usecase "Query routed orders" as UC13
+}
+
+user --> UC1
+user --> UC2
+user --> UC3
+user --> UC4
+user --> UC5
+
+UC4 ..> UC6 : <<includes>>
+UC4 ..> UC7 : <<includes>>
+UC4 ..> UC8 : <<includes>>
+UC4 ..> UC9 : <<includes>>
+UC4 ..> UC10 : <<includes>>
+UC4 ..> UC12 : <<includes>>
+
+UC10 ..> UC11 : <<extends>>
+
+UC1 --> pms
+UC2 --> pms
+UC3 --> pms
+UC6 --> pms
+UC7 --> pms
+UC8 --> pms
+UC9 --> pms
+UC10 --> pms
+
+UC12 --> broker
+
+UC5 ..> UC13 : <<includes>>
+
+@enduml
+
