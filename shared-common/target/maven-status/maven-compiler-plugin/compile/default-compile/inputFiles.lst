@@ -1,6 +1,2 @@
-/Users/jonasfrerker/Documents/GitHub/ICS-GROUP-ONE/shared-common/src/main/java/com/trading/shared/client/PmsClient.java
-/Users/jonasfrerker/Documents/GitHub/ICS-GROUP-ONE/shared-common/src/main/java/com/trading/shared/dto/OrderValidationResult.java
-/Users/jonasfrerker/Documents/GitHub/ICS-GROUP-ONE/shared-common/src/main/java/com/trading/shared/dto/ComplianceCheckResult.java
-/Users/jonasfrerker/Documents/GitHub/ICS-GROUP-ONE/shared-common/src/main/java/com/trading/shared/dto/OrderValidationRequest.java
-/Users/jonasfrerker/Documents/GitHub/ICS-GROUP-ONE/shared-common/src/main/java/com/trading/shared/dto/ComplianceCheckRequest.java
-/Users/jonasfrerker/Documents/GitHub/ICS-GROUP-ONE/shared-common/src/main/java/com/trading/shared/util/JsonMapper.java
+/Users/justus/Downloads/ICS-GROUP-ONE/shared-common/src/main/java/com/trading/shared/util/JsonMapper.java
+/Users/justus/Downloads/ICS-GROUP-ONE/shared-common/src/main/java/com/trading/shared/client/PmsClient.java

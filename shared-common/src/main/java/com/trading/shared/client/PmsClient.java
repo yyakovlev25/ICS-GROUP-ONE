@@ -13,12 +13,12 @@ import java.time.Duration;
 import java.util.Optional;
 
 /**
- * HTTP client for the professor-provided PMS server (localhost:8090).
+ * HTTP client for the PMS server.
  *
- * PMS endpoints used:
+ * Endpoints used:
  *   GET /pms/instrument/all
  *   GET /pms/instrument/{isin}
- *   GET /pms/instrument/{isin}/regulartory   (typo is intentional – matches server path)
+ *   GET /pms/instrument/{isin}/regulartory   (typo matches the server path)
  *   GET /pms/instrument/price/{isin}/{currency}
  *   GET /pms/customer/all
  *   GET /pms/customer/{externalId}
@@ -37,8 +37,6 @@ public class PmsClient {
         this.baseUrl = baseUrl.endsWith("/") ? baseUrl.substring(0, baseUrl.length() - 1) : baseUrl;
     }
 
-    // ── Instrument endpoints ──────────────────────────────────────────────────
-
     public Optional<JsonNode> getAllInstruments() {
         return get("/instrument/all");
     }
@@ -47,7 +45,7 @@ public class PmsClient {
         return get("/instrument/" + isin);
     }
 
-    /** Path uses the typo present in the PMS server: /regulartory */
+    /** Path uses the typo from the PMS server: /regulartory */
     public Optional<JsonNode> getRegulatoryInfo(String isin) {
         return get("/instrument/" + isin + "/regulartory");
     }
@@ -56,8 +54,6 @@ public class PmsClient {
         return get("/instrument/price/" + isin + "/" + currency);
     }
 
-    // ── Customer endpoints ────────────────────────────────────────────────────
-
     public Optional<JsonNode> getAllCustomers() {
         return get("/customer/all");
     }
@@ -65,8 +61,6 @@ public class PmsClient {
     public Optional<JsonNode> getCustomer(String externalId) {
         return get("/customer/" + externalId);
     }
-
-    // ── Internal ──────────────────────────────────────────────────────────────
 
     private Optional<JsonNode> get(String path) {
         String url = baseUrl + path;
@@ -92,3 +86,4 @@ public class PmsClient {
         }
     }
 }
+

@@ -1,52 +1,129 @@
 package com.trading.compliance;
 
-import com.trading.compliance.controller.ComplianceController;
-import com.trading.compliance.service.ComplianceService;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.trading.shared.client.PmsClient;
 import io.javalin.Javalin;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
+import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
+/**
+ * Compliance service.
+ *
+ * All facts come from the PMS server:
+ *   /pms/customer/{customerId}
+ *   /pms/instrument/{isin}
+ *   /pms/instrument/{isin}/regulartory
+ *
+ * REST endpoints:
+ *   GET  /api/compliance/instrument/{isin}
+ *   GET  /api/compliance/customer/{customerId}/{isin}
+ *   POST /check
+ */
 public class Main {
 
-    private static final Logger log = LoggerFactory.getLogger(Main.class);
-
     public static void main(String[] args) {
-        String pmsUrl = env("PMS_BASE_URL", "http://localhost:8090/pms");
-        int    port   = Integer.parseInt(env("PORT", "8084"));
-
-        log.info("Starting compliance-service on port {} (PMS={})", port, pmsUrl);
-
+        String pmsUrl = System.getenv().getOrDefault("PMS_BASE_URL", "http://localhost:8090/pms");
+        int port      = Integer.parseInt(System.getenv().getOrDefault("PORT", "8084"));
         PmsClient pms = new PmsClient(pmsUrl);
-        ComplianceService service = new ComplianceService(pms);
-        ComplianceController controller = new ComplianceController(service);
 
-        Javalin app = Javalin.create(cfg -> cfg.showJavalinBanner = false);
+        Javalin app = Javalin.create(c -> c.showJavalinBanner = false).start(port);
 
-        // CORS headers for future frontend use
-        app.before(ctx -> {
-            ctx.header("Access-Control-Allow-Origin",  "*");
-            ctx.header("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-            ctx.header("Access-Control-Allow-Headers", "Content-Type");
-        });
-        app.options("/*", ctx -> ctx.status(204));
+        app.get("/health", ctx -> ctx.json(Map.of("status", "UP", "service", "compliance-service")));
 
-        app.exception(Exception.class, (e, ctx) -> {
-            log.error("Unhandled error", e);
-            ctx.status(500).json(Map.of("error",
-                    e.getMessage() != null ? e.getMessage() : "Internal server error"));
+        app.get("/api/compliance/instrument/{isin}", ctx -> {
+            String isin = ctx.pathParam("isin");
+            Map<String, Object> result = check(pms, isin);
+            ctx.status((boolean) result.get("approved") ? 200 : 422).json(result);
         });
 
-        controller.register(app);
-        app.start(port);
+        app.get("/api/compliance/customer/{customerId}/{isin}", ctx -> {
+            String customerId = ctx.pathParam("customerId");
+            String isin       = ctx.pathParam("isin");
+            Map<String, Object> result = checkCustomerAndInstrument(pms, customerId, isin);
+            ctx.status((boolean) result.get("approved") ? 200 : 422).json(result);
+        });
 
-        log.info("compliance-service ready → http://localhost:{}", port);
+        app.post("/check", ctx -> {
+            @SuppressWarnings("unchecked")
+            Map<String, Object> req = ctx.bodyAsClass(Map.class);
+            String isin = String.valueOf(req.get("isin"));
+            Map<String, Object> result = check(pms, isin);
+            ctx.status((boolean) result.get("approved") ? 200 : 422).json(result);
+        });
+
+        System.out.println("compliance-service running on http://localhost:" + port);
     }
 
-    private static String env(String key, String defaultValue) {
-        String v = System.getenv(key);
-        return (v != null && !v.isBlank()) ? v : defaultValue;
+    /** Verdict for an instrument based on PMS instrument and regulatory data. */
+    public static Map<String, Object> check(PmsClient pms, String isin) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("isin", isin);
+
+        Optional<JsonNode> instrument = pms.getInstrument(isin);
+        if (instrument.isEmpty()) {
+            return reject(result, "Instrument " + isin + " not found in PMS");
+        }
+        JsonNode instrNode = instrument.get();
+        if (instrNode.has("name")) result.put("name", instrNode.get("name").asText());
+        result.put("pmsInstrument", instrNode);
+
+        Optional<JsonNode> regulatory = pms.getRegulatoryInfo(isin);
+        regulatory.ifPresent(node -> result.put("pmsRegulatory", node));
+
+        boolean restricted = regulatory.map(Main::isRestricted).orElse(false);
+        result.put("restricted", restricted);
+
+        if (restricted) {
+            return reject(result, "Instrument " + isin + " is flagged as restricted by PMS");
+        }
+
+        result.put("approved", true);
+        result.put("rejectionReasons", List.of());
+        return result;
+    }
+
+    /** Verdict for a customer trying to trade a specific instrument. */
+    public static Map<String, Object> checkCustomerAndInstrument(PmsClient pms,
+                                                                 String customerId,
+                                                                 String isin) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("customerId", customerId);
+        result.put("isin", isin);
+
+        Optional<JsonNode> customer = pms.getCustomer(customerId);
+        if (customer.isEmpty()) {
+            return reject(result, "Customer " + customerId + " not found in PMS");
+        }
+        result.put("pmsCustomer", customer.get());
+
+        Map<String, Object> instrumentResult = check(pms, isin);
+        result.put("instrumentCheck", instrumentResult);
+
+        if (!(boolean) instrumentResult.get("approved")) {
+            return reject(result, "Instrument check failed: " + instrumentResult.get("rejectionReasons"));
+        }
+
+        result.put("approved", true);
+        result.put("rejectionReasons", List.of());
+        return result;
+    }
+
+    /** Reads the restricted flag from PMS regulatory JSON, accepting common field names. */
+    static boolean isRestricted(JsonNode regulatory) {
+        for (String field : new String[]{"isRestricted", "restricted", "tradeRestricted", "sanctioned"}) {
+            JsonNode v = regulatory.get(field);
+            if (v != null && !v.isNull() && v.asBoolean()) return true;
+        }
+        return false;
+    }
+
+    private static Map<String, Object> reject(Map<String, Object> result, String reason) {
+        result.put("approved", false);
+        result.put("rejectionReasons", List.of(reason));
+        return result;
     }
 }
+
