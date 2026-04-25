@@ -6,7 +6,7 @@ import org.apache.activemq.artemis.core.server.embedded.EmbeddedActiveMQ;
 
 /**
  * Starts an embedded Apache Artemis broker.
- * Acceptor on port 61616 (TCP), web console on port 8161.
+ * Acceptor on port 61616 (TCP).
  */
 public class ArtemisBroker {
 
@@ -17,6 +17,7 @@ public class ArtemisBroker {
         config.addAcceptorConfiguration("tcp", "tcp://0.0.0.0:61616");
         config.setSecurityEnabled(false);
         config.setPersistenceEnabled(false);
+        config.setJMXManagementEnabled(false);
         config.setJournalDirectory("target/artemis/journal");
         config.setBindingsDirectory("target/artemis/bindings");
         config.setLargeMessagesDirectory("target/artemis/largemessages");
@@ -30,4 +31,3 @@ public class ArtemisBroker {
         broker.stop();
     }
 }
-
