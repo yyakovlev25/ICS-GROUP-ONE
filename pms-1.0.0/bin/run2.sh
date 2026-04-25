@@ -38,4 +38,4 @@ fi
 "$JAVA" -version
 
 # start application
-exec "$JAVA" $JAVA_OPTS -cp "$CP" de.mbg.pms.ServerMain "$@"
+exec "$JAVA" $JAVA_OPTS -cp "$CP" de.mbg.pms.ServerMain2 "$@"

@@ -44,5 +44,5 @@ if not defined JAVA_EXE (
 REM Optional: show resolved java version
 "%JAVA_EXE%" -version
 
-"%JAVA_EXE%" %JAVA_OPTS% -cp "%CP%" de.mbg.pms.ServerMain %*
+"%JAVA_EXE%" %JAVA_OPTS% -cp "%CP%" de.mbg.pms.ServerMain2 %*
 endlocal
