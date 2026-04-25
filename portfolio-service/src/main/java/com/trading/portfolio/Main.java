@@ -1,35 +1,26 @@
 package com.trading.portfolio;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.trading.shared.client.PmsClient;
 import io.javalin.Javalin;
 
-import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 /**
  * Portfolio service.
  *
- * Cash balance per customer is held in-memory; everything else
- * (customer master data) is fetched from the PMS server.
+ * All data comes from the PMS server (customer master data including
+ * cash accounts and status). No local database.
  *
  * REST endpoints:
- *   GET  /api/portfolio
  *   GET  /api/portfolio/{customerId}
- *   GET  /api/portfolio/{customerId}/check/{quantity}/{price}
+ *   GET  /api/portfolio/{customerId}/check/{isin}/{quantity}/{price}
  *   POST /validate
  */
 public class Main {
-
-    /** customerId -> cash balance in EUR */
-    static final Map<String, Double> BALANCES = new HashMap<>(Map.of(
-            "100001",  50_000.0,
-            "100002",     500.0,
-            "100003",  25_000.0,
-            "100004",       0.0,
-            "100005",  15_000.0
-    ));
 
     public static void main(String[] args) {
         String pmsUrl = System.getenv().getOrDefault("PMS_BASE_URL", "http://localhost:8090/pms");
@@ -38,19 +29,18 @@ public class Main {
 
         Javalin app = Javalin.create(c -> c.showJavalinBanner = false).start(port);
 
-        app.get("/api/portfolio", ctx -> ctx.json(BALANCES));
-
         app.get("/api/portfolio/{customerId}", ctx -> {
             String customerId = ctx.pathParam("customerId");
             Map<String, Object> body = customerOverview(pms, customerId);
             ctx.status(body.containsKey("error") ? 404 : 200).json(body);
         });
 
-        app.get("/api/portfolio/{customerId}/check/{quantity}/{price}", ctx -> {
+        app.get("/api/portfolio/{customerId}/check/{isin}/{quantity}/{price}", ctx -> {
             String customerId = ctx.pathParam("customerId");
+            String isin       = ctx.pathParam("isin");
             double quantity   = Double.parseDouble(ctx.pathParam("quantity"));
             double price      = Double.parseDouble(ctx.pathParam("price"));
-            Map<String, Object> result = validate(pms, customerId, quantity, price);
+            Map<String, Object> result = validate(pms, customerId, isin, quantity, price, "EUR");
             ctx.status((boolean) result.get("valid") ? 200 : 422).json(result);
         });
 
@@ -58,59 +48,94 @@ public class Main {
             @SuppressWarnings("unchecked")
             Map<String, Object> req = ctx.bodyAsClass(Map.class);
             String customerId = String.valueOf(req.get("customerId"));
+            String isin       = String.valueOf(req.getOrDefault("isin", ""));
             double quantity   = ((Number) req.getOrDefault("quantity", 0)).doubleValue();
             double price      = ((Number) req.getOrDefault("pricePerUnit", 0)).doubleValue();
-            Map<String, Object> result = validate(pms, customerId, quantity, price);
+            String currency   = String.valueOf(req.getOrDefault("currency", "EUR"));
+            Map<String, Object> result = validate(pms, customerId, isin, quantity, price, currency);
             ctx.status((boolean) result.get("valid") ? 200 : 422).json(result);
         });
 
         System.out.println("portfolio-service running on http://localhost:" + port);
     }
 
-    /** Combined PMS customer data and local balance. */
+    /** Returns PMS customer data with cash accounts. */
     public static Map<String, Object> customerOverview(PmsClient pms, String customerId) {
         Map<String, Object> overview = new LinkedHashMap<>();
         overview.put("customerId", customerId);
 
-        var pmsCustomer = pms.getCustomer(customerId);
-        if (pmsCustomer.isEmpty()) {
+        Optional<JsonNode> customer = pms.getCustomer(customerId);
+        if (customer.isEmpty()) {
             overview.put("error", "Customer " + customerId + " not found in PMS");
             return overview;
         }
-        overview.put("pmsData", pmsCustomer.get());
-
-        Double balance = BALANCES.get(customerId);
-        overview.put("hasLocalAccount", balance != null);
-        overview.put("cashBalance", balance != null ? balance : 0.0);
+        JsonNode node = customer.get();
+        overview.put("fullName", textOrNull(node, "fullName"));
+        overview.put("status", textOrNull(node, "status"));
+        overview.put("riskProfile", textOrNull(node, "riskProfile"));
+        overview.put("country", textOrNull(node, "country"));
+        overview.put("cashAccounts", node.get("cashAccounts"));
         return overview;
     }
 
-    /** Validates a buy order against the customer's cash balance. */
+    /** Validates a buy order using PMS customer data (status + cash accounts). */
     public static Map<String, Object> validate(PmsClient pms, String customerId,
-                                               double quantity, double pricePerUnit) {
+                                               String isin, double quantity,
+                                               double pricePerUnit, String currency) {
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("customerId", customerId);
+        result.put("isin", isin);
         result.put("quantity", quantity);
         result.put("pricePerUnit", pricePerUnit);
+        result.put("currency", currency);
 
-        if (pms.getCustomer(customerId).isEmpty()) {
+        // 1. Customer must exist in PMS
+        Optional<JsonNode> customerOpt = pms.getCustomer(customerId);
+        if (customerOpt.isEmpty()) {
             return fail(result, "Customer " + customerId + " not found in PMS");
         }
-        Double balance = BALANCES.get(customerId);
-        if (balance == null) {
-            return fail(result, "No account for customer " + customerId);
+        JsonNode customer = customerOpt.get();
+
+        // 2. Customer must be ACTIVE
+        String status = textOrNull(customer, "status");
+        result.put("customerStatus", status);
+        if (!"ACTIVE".equalsIgnoreCase(status)) {
+            return fail(result, "Customer " + customerId + " is " + status + ", trading not allowed");
         }
-        result.put("cashBalance", balance);
+
+        // 3. Find matching cash account by currency
+        double available = findCashBalance(customer, currency);
+        result.put("availableCash", available);
+        result.put("availableCurrency", currency);
 
         double required = quantity * pricePerUnit;
         result.put("required", required);
-        if (balance < required) {
-            return fail(result, "Insufficient cash: need " + required + " EUR, available " + balance + " EUR");
+
+        if (available < required) {
+            return fail(result, "Insufficient cash: need " + required + " " + currency
+                    + ", available " + available + " " + currency);
         }
 
         result.put("valid", true);
         result.put("errors", List.of());
         return result;
+    }
+
+    /** Finds the cash balance for a given currency from the PMS cashAccounts array. */
+    static double findCashBalance(JsonNode customer, String currency) {
+        JsonNode accounts = customer.get("cashAccounts");
+        if (accounts == null || !accounts.isArray()) return 0.0;
+        for (JsonNode acc : accounts) {
+            if (currency.equalsIgnoreCase(acc.path("currency").asText(""))) {
+                return acc.path("amount").asDouble(0.0);
+            }
+        }
+        return 0.0;
+    }
+
+    static String textOrNull(JsonNode node, String field) {
+        JsonNode v = node.get(field);
+        return (v != null && !v.isNull()) ? v.asText() : null;
     }
 
     private static Map<String, Object> fail(Map<String, Object> result, String reason) {
@@ -119,3 +144,4 @@ public class Main {
         return result;
     }
 }
+

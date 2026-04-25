@@ -1,7 +1,7 @@
 # Trading Platform – ICS Group One
 
-Two small microservices that fetch master data from the PMS server and run
-simple business checks on top of it
+Two microservices that fetch all data from the PMS server and apply
+business rules on top of it. No local database, no hardcoded data.
 
 ```
                 ┌─────────────────────────────┐
@@ -17,105 +17,141 @@ simple business checks on top of it
    ┌──────────▼──────────┐         ┌──────────▼──────────┐
    │ portfolio-service   │         │ compliance-service  │
    │ Port 8082           │         │ Port 8084           │
-   │ - local cash map    │         │ - PMS instrument    │
-   │ - PMS customer data │         │ - PMS regulatory    │
-   │                     │         │ - PMS customer data │
+   │                     │         │                     │
+   │ checks:             │         │ checks:             │
+   │ - customer ACTIVE?  │         │ - customer ACTIVE?  │
+   │ - enough cash?      │         │ - not sanctioned?   │
+   │                     │         │ - risk profile ok?  │
    └─────────────────────┘         └─────────────────────┘
 ```
 
-Customer data comes from the PMS customer endpoint
-Instrument data and the restricted flag come from the PMS instrument and
-regulatory endpoints. The only thing kept locally is the cash balance per
-customer in the portfolio service.
-
-
 ### portfolio-service – `http://localhost:8082`
 
-| Method | Path                                                   | Purpose |
-|--------|--------------------------------------------------------|---------|
-| GET    | `/api/portfolio`                                       | All cash balances |
-| GET    | `/api/portfolio/{customerId}`                          | PMS customer data + local balance |
-| GET    | `/api/portfolio/{customerId}/check/{quantity}/{price}` | Validate a buy order |
-| POST   | `/validate`                                            | Same check via JSON body |
+| Method | Path | Purpose |
+|--------|------|---------|
+| GET | `/api/portfolio/{customerId}` | PMS customer data + cash accounts |
+| GET | `/api/portfolio/{customerId}/check/{isin}/{quantity}/{price}` | Validate a buy order |
+| POST | `/validate` | Same check via JSON body |
+
+**Portfolio checks:**
+- Customer exists in PMS
+- Customer status is ACTIVE (not BLOCKED)
+- Cash balance in the matching currency covers `quantity * price`
+
+Cash balances come from `PMS /customer/{id}` -> `cashAccounts[]`.
 
 ### compliance-service – `http://localhost:8084`
 
-| Method | Path                                             | Purpose |
-|--------|--------------------------------------------------|------|
-| GET    | `/api/compliance/instrument/{isin}`              | Verdict for a single instrument |
-| GET    | `/api/compliance/customer/{customerId}/{isin}`   | Combined customer + instrument check |
-| POST   | `/check`                                         | Same check via JSON body |
+| Method | Path | Purpose |
+|--------|------|---------|
+| GET | `/api/compliance/instrument/{isin}` | Instrument check (sanctioned?) |
+| GET | `/api/compliance/customer/{customerId}/{isin}` | Full compliance check |
+| POST | `/check` | Same check via JSON body |
 
+**Compliance checks:**
+- Customer exists in PMS and is ACTIVE
+- Instrument exists in PMS
+- Instrument is not sanctioned (`sanctioned: true` in PMS regulatory)
+- Customer risk profile >= instrument risk category
+  - LOW < MEDIUM < HIGH
+  - A LOW customer cannot trade MEDIUM or HIGH instruments
 
+## Build and test
+
+```bash
+mvn clean package
+```
+
+## Run
+
+```bash
+cd pms-1.0.0 && ./bin/run.sh
+java -jar portfolio-service/target/portfolio-service-1.0-SNAPSHOT.jar
+java -jar compliance-service/target/compliance-service-1.0-SNAPSHOT.jar
+```
 
 ## Demo scenarios
 
-### A) Customer overview
+### Portfolio
+
+Customer overview (Alice, ACTIVE, 12000 EUR + 5000 GBP):
 ```
 http://localhost:8082/api/portfolio/100001
 ```
-Returns the customer JSON from PMS plus the local cash balance.
 
-### B) Validate a buy order
-
-Customer 100001 has 50,000 EUR, so 10 units at 100 EUR is fine:
+Buy ok (10 x 100 EUR = 1000, Alice has 12000 EUR):
 ```
-http://localhost:8082/api/portfolio/100001/check/10/100
+http://localhost:8082/api/portfolio/100001/check/DE0005140008/10/100
 ```
 
-Customer 100002 only has 500 EUR, so the same order fails:
+Buy rejected, insufficient cash (Bob has 100000 CHF but only 30000 USD):
 ```
-http://localhost:8082/api/portfolio/100002/check/10/100
+http://localhost:8082/api/portfolio/100002/check/DE0005140008/500/100
+```
+
+Rejected, customer BLOCKED (David):
+```
+http://localhost:8082/api/portfolio/100004/check/DE0005140008/1/1
 ```
 
 Unknown customer:
 ```
-http://localhost:8082/api/portfolio/999999/check/1/1
+http://localhost:8082/api/portfolio/999999/check/DE0005140008/1/1
 ```
 
-### C) Instrument check
+### Compliance
 
-Normal instrument:
+Normal instrument (not sanctioned):
 ```
 http://localhost:8084/api/compliance/instrument/DE0005140008
 ```
 
-Instrument flagged as restricted by PMS:
+Sanctioned instrument:
 ```
 http://localhost:8084/api/compliance/instrument/US0000000001
 ```
 
-Unknown ISIN:
+Full check – approved (Carla, HIGH risk profile):
 ```
-http://localhost:8084/api/compliance/instrument/XX0000000000
-```
-
-### D) Combined check
-
-Approved (customer and instrument both ok):
-```
-http://localhost:8084/api/compliance/customer/100001/DE0005140008
+http://localhost:8084/api/compliance/customer/100003/DE0005140008
 ```
 
-Rejected (instrument restricted):
+Rejected – customer BLOCKED (David):
 ```
-http://localhost:8084/api/compliance/customer/100001/US0000000001
+http://localhost:8084/api/compliance/customer/100004/DE0005140008
 ```
 
-Rejected (customer unknown):
+Rejected – risk profile too low (Alice is LOW, instrument is MEDIUM):
+```
+http://localhost:8084/api/compliance/customer/100001/CH0038863350
+```
+
+Rejected – sanctioned instrument:
+```
+http://localhost:8084/api/compliance/customer/100003/US0000000001
+```
+
+Unknown customer:
 ```
 http://localhost:8084/api/compliance/customer/999999/DE0005140008
 ```
 
-## How a check works
+## PMS test data
 
-1. Browser or curl sends a GET request to one of our services
-2. The service calls the PMS server to fetch the relevant master data
-3. The service applies its rule
-   - portfolio-service: `cashBalance >= quantity * pricePerUnit`
-   - compliance-service: PMS regulatory flag `isRestricted` / `restricted` /
-     `tradeRestricted` / `sanctioned`
-4. The service responds with HTTP 200 and `valid`/`approved = true`,
-   or HTTP 422 and a rejection reason
+| Customer | Name | Status | Risk Profile | Cash |
+|----------|------|--------|-------------|------|
+| 100001 | Alice | ACTIVE | LOW | 12000 EUR, 5000 GBP |
+| 100002 | Bob | ACTIVE | MEDIUM | 100000 CHF, 30000 USD |
+| 100003 | Carla | ACTIVE | HIGH | 55000 EUR |
+| 100004 | David | BLOCKED | MEDIUM | 100000 EUR |
+| 100005 | Eva | ACTIVE | LOW | 5000 EUR, 330000 CHF, 105000 GBP |
 
+## Project layout
+
+```
+shared-common/         PmsClient + JsonMapper
+portfolio-service/     Main.java + MainTest.java
+compliance-service/    Main.java + MainTest.java
+pms-1.0.0/             PMS server
+```
 

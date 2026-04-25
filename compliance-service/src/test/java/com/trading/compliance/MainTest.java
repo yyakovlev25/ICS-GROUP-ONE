@@ -13,7 +13,7 @@ import static org.junit.jupiter.api.Assertions.*;
 
 /**
  * Tests for the compliance service.
- * Uses a stub PmsClient so the tests do not need a running PMS server.
+ * Uses a stub PmsClient so no running PMS server is needed.
  */
 class MainTest {
 
@@ -21,64 +21,93 @@ class MainTest {
         StubPms() { super("http://nope"); }
 
         @Override
+        public Optional<JsonNode> getCustomer(String id) {
+            return switch (id) {
+                case "100001" -> Optional.of(customer("100001", "ACTIVE", "LOW"));
+                case "100003" -> Optional.of(customer("100003", "ACTIVE", "HIGH"));
+                case "100004" -> Optional.of(customer("100004", "BLOCKED", "MEDIUM"));
+                default -> Optional.empty();
+            };
+        }
+
+        @Override
         public Optional<JsonNode> getInstrument(String isin) {
-            if ("DE0005140008".equals(isin) || "US0000000001".equals(isin)) {
-                return Optional.of(JsonNodeFactory.instance.objectNode()
-                        .put("isin", isin).put("name", "Test " + isin));
-            }
-            return Optional.empty();
+            if ("XX0000000000".equals(isin)) return Optional.empty();
+            return Optional.of(JsonNodeFactory.instance.objectNode()
+                    .put("isin", isin).put("name", "Test " + isin));
         }
 
         @Override
         public Optional<JsonNode> getRegulatoryInfo(String isin) {
             ObjectNode reg = JsonNodeFactory.instance.objectNode().put("isin", isin);
-            reg.put("isRestricted", "US0000000001".equals(isin));
+            reg.put("sanctioned", "US0000000001".equals(isin));
+            reg.put("riskCategory", "DE0005140008".equals(isin) ? "LOW" : "MEDIUM");
             return Optional.of(reg);
         }
 
-        @Override
-        public Optional<JsonNode> getCustomer(String id) {
-            if ("100001".equals(id)) {
-                return Optional.of(JsonNodeFactory.instance.objectNode().put("externalId", id));
-            }
-            return Optional.empty();
+        private ObjectNode customer(String id, String status, String risk) {
+            ObjectNode c = JsonNodeFactory.instance.objectNode();
+            c.put("externalCustomerNumber", id);
+            c.put("fullName", "Test " + id);
+            c.put("status", status);
+            c.put("riskProfile", risk);
+            c.putArray("cashAccounts").addObject().put("amount", 10000).put("currency", "EUR");
+            return c;
         }
     }
 
     @Test
-    void check_approved_for_normal_instrument() {
-        Map<String, Object> result = Main.check(new StubPms(), "DE0005140008");
+    void instrument_approved_when_not_sanctioned() {
+        var result = Main.checkInstrument(new StubPms(), "DE0005140008");
         assertTrue((boolean) result.get("approved"));
-        assertEquals(false, result.get("restricted"));
+        assertEquals(false, result.get("sanctioned"));
     }
 
     @Test
-    void check_rejected_when_pms_marks_instrument_restricted() {
-        Map<String, Object> result = Main.check(new StubPms(), "US0000000001");
+    void instrument_rejected_when_sanctioned() {
+        var result = Main.checkInstrument(new StubPms(), "US0000000001");
         assertFalse((boolean) result.get("approved"));
-        assertTrue(result.get("rejectionReasons").toString().contains("restricted"));
+        assertTrue(result.get("rejectionReasons").toString().contains("sanctioned"));
     }
 
     @Test
-    void check_rejected_when_isin_unknown() {
-        Map<String, Object> result = Main.check(new StubPms(), "XX0000000000");
+    void instrument_rejected_when_unknown() {
+        var result = Main.checkInstrument(new StubPms(), "XX0000000000");
         assertFalse((boolean) result.get("approved"));
-        assertTrue(result.get("rejectionReasons").toString().contains("not found in PMS"));
     }
 
     @Test
-    void combined_check_rejected_when_customer_unknown() {
-        Map<String, Object> result = Main.checkCustomerAndInstrument(
-                new StubPms(), "999999", "DE0005140008");
-        assertFalse((boolean) result.get("approved"));
-        assertTrue(result.get("rejectionReasons").toString().contains("Customer"));
-    }
-
-    @Test
-    void combined_check_approved_when_customer_and_instrument_ok() {
-        Map<String, Object> result = Main.checkCustomerAndInstrument(
-                new StubPms(), "100001", "DE0005140008");
+    void combined_approved_when_all_ok() {
+        // 100003 has HIGH risk profile, instrument riskCategory is MEDIUM -> ok
+        var result = Main.checkCustomerAndInstrument(new StubPms(), "100003", "DE0005140008");
         assertTrue((boolean) result.get("approved"));
+    }
+
+    @Test
+    void combined_rejected_when_customer_blocked() {
+        var result = Main.checkCustomerAndInstrument(new StubPms(), "100004", "DE0005140008");
+        assertFalse((boolean) result.get("approved"));
+        assertTrue(result.get("rejectionReasons").toString().contains("BLOCKED"));
+    }
+
+    @Test
+    void combined_rejected_when_risk_too_low() {
+        // 100001 has LOW risk profile, CH0038863350 has riskCategory MEDIUM -> rejected
+        var result = Main.checkCustomerAndInstrument(new StubPms(), "100001", "CH0038863350");
+        assertFalse((boolean) result.get("approved"));
+        assertTrue(result.get("rejectionReasons").toString().contains("too low"));
+    }
+
+    @Test
+    void combined_rejected_when_customer_unknown() {
+        var result = Main.checkCustomerAndInstrument(new StubPms(), "999999", "DE0005140008");
+        assertFalse((boolean) result.get("approved"));
+    }
+
+    @Test
+    void combined_rejected_when_instrument_sanctioned() {
+        var result = Main.checkCustomerAndInstrument(new StubPms(), "100003", "US0000000001");
+        assertFalse((boolean) result.get("approved"));
     }
 }
 

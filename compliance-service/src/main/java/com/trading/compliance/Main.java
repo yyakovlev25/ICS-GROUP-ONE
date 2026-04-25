@@ -12,10 +12,17 @@ import java.util.Optional;
 /**
  * Compliance service.
  *
- * All facts come from the PMS server:
- *   /pms/customer/{customerId}
- *   /pms/instrument/{isin}
- *   /pms/instrument/{isin}/regulartory
+ * All data comes from PMS:
+ *   /pms/customer/{id}               -> status, riskProfile
+ *   /pms/instrument/{isin}           -> instrument data
+ *   /pms/instrument/{isin}/regulartory -> sanctioned flag, riskCategory
+ *
+ * Checks performed:
+ *   1. Customer exists and is ACTIVE (not BLOCKED)
+ *   2. Instrument exists in PMS
+ *   3. Instrument is not sanctioned
+ *   4. Customer riskProfile >= instrument riskCategory
+ *      (LOW < MEDIUM < HIGH)
  *
  * REST endpoints:
  *   GET  /api/compliance/instrument/{isin}
@@ -23,6 +30,12 @@ import java.util.Optional;
  *   POST /check
  */
 public class Main {
+
+    private static final Map<String, Integer> RISK_LEVELS = Map.of(
+            "LOW", 1,
+            "MEDIUM", 2,
+            "HIGH", 3
+    );
 
     public static void main(String[] args) {
         String pmsUrl = System.getenv().getOrDefault("PMS_BASE_URL", "http://localhost:8090/pms");
@@ -33,7 +46,7 @@ public class Main {
 
         app.get("/api/compliance/instrument/{isin}", ctx -> {
             String isin = ctx.pathParam("isin");
-            Map<String, Object> result = check(pms, isin);
+            Map<String, Object> result = checkInstrument(pms, isin);
             ctx.status((boolean) result.get("approved") ? 200 : 422).json(result);
         });
 
@@ -47,16 +60,17 @@ public class Main {
         app.post("/check", ctx -> {
             @SuppressWarnings("unchecked")
             Map<String, Object> req = ctx.bodyAsClass(Map.class);
-            String isin = String.valueOf(req.get("isin"));
-            Map<String, Object> result = check(pms, isin);
+            String customerId = String.valueOf(req.getOrDefault("customerId", ""));
+            String isin       = String.valueOf(req.getOrDefault("isin", ""));
+            Map<String, Object> result = checkCustomerAndInstrument(pms, customerId, isin);
             ctx.status((boolean) result.get("approved") ? 200 : 422).json(result);
         });
 
         System.out.println("compliance-service running on http://localhost:" + port);
     }
 
-    /** Verdict for an instrument based on PMS instrument and regulatory data. */
-    public static Map<String, Object> check(PmsClient pms, String isin) {
+    /** Checks instrument only: exists + not sanctioned. */
+    public static Map<String, Object> checkInstrument(PmsClient pms, String isin) {
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("isin", isin);
 
@@ -65,17 +79,19 @@ public class Main {
             return reject(result, "Instrument " + isin + " not found in PMS");
         }
         JsonNode instrNode = instrument.get();
-        if (instrNode.has("name")) result.put("name", instrNode.get("name").asText());
-        result.put("pmsInstrument", instrNode);
+        result.put("instrumentName", textOrNull(instrNode, "name"));
+        result.put("assetClass", textOrNull(instrNode, "assetClass"));
 
         Optional<JsonNode> regulatory = pms.getRegulatoryInfo(isin);
-        regulatory.ifPresent(node -> result.put("pmsRegulatory", node));
+        if (regulatory.isPresent()) {
+            JsonNode reg = regulatory.get();
+            result.put("sanctioned", reg.path("sanctioned").asBoolean(false));
+            result.put("riskCategory", textOrNull(reg, "riskCategory"));
+            result.put("mifidCategory", textOrNull(reg, "mifidCategory"));
 
-        boolean restricted = regulatory.map(Main::isRestricted).orElse(false);
-        result.put("restricted", restricted);
-
-        if (restricted) {
-            return reject(result, "Instrument " + isin + " is flagged as restricted by PMS");
+            if (reg.path("sanctioned").asBoolean(false)) {
+                return reject(result, "Instrument " + isin + " is sanctioned");
+            }
         }
 
         result.put("approved", true);
@@ -83,7 +99,7 @@ public class Main {
         return result;
     }
 
-    /** Verdict for a customer trying to trade a specific instrument. */
+    /** Full compliance check: customer status + risk profile vs instrument. */
     public static Map<String, Object> checkCustomerAndInstrument(PmsClient pms,
                                                                  String customerId,
                                                                  String isin) {
@@ -91,17 +107,43 @@ public class Main {
         result.put("customerId", customerId);
         result.put("isin", isin);
 
-        Optional<JsonNode> customer = pms.getCustomer(customerId);
-        if (customer.isEmpty()) {
+        // 1. Customer must exist
+        Optional<JsonNode> customerOpt = pms.getCustomer(customerId);
+        if (customerOpt.isEmpty()) {
             return reject(result, "Customer " + customerId + " not found in PMS");
         }
-        result.put("pmsCustomer", customer.get());
+        JsonNode customer = customerOpt.get();
+        String customerStatus = textOrNull(customer, "status");
+        String riskProfile    = textOrNull(customer, "riskProfile");
+        result.put("customerName", textOrNull(customer, "fullName"));
+        result.put("customerStatus", customerStatus);
+        result.put("riskProfile", riskProfile);
 
-        Map<String, Object> instrumentResult = check(pms, isin);
-        result.put("instrumentCheck", instrumentResult);
+        // 2. Customer must be ACTIVE
+        if (!"ACTIVE".equalsIgnoreCase(customerStatus)) {
+            return reject(result, "Customer " + customerId + " is " + customerStatus);
+        }
 
-        if (!(boolean) instrumentResult.get("approved")) {
-            return reject(result, "Instrument check failed: " + instrumentResult.get("rejectionReasons"));
+        // 3. Instrument check (exists + not sanctioned)
+        Map<String, Object> instrResult = checkInstrument(pms, isin);
+        result.put("instrumentCheck", instrResult);
+
+        if (!(boolean) instrResult.get("approved")) {
+            return reject(result, "Instrument rejected: " + instrResult.get("rejectionReasons"));
+        }
+
+        // 4. Risk profile check: customer riskProfile must be >= instrument riskCategory
+        String riskCategory = (String) instrResult.get("riskCategory");
+        if (riskProfile != null && riskCategory != null) {
+            int customerLevel    = RISK_LEVELS.getOrDefault(riskProfile.toUpperCase(), 0);
+            int instrumentLevel  = RISK_LEVELS.getOrDefault(riskCategory.toUpperCase(), 0);
+            result.put("customerRiskLevel", customerLevel);
+            result.put("instrumentRiskLevel", instrumentLevel);
+
+            if (customerLevel < instrumentLevel) {
+                return reject(result, "Customer risk profile " + riskProfile
+                        + " is too low for instrument risk category " + riskCategory);
+            }
         }
 
         result.put("approved", true);
@@ -109,13 +151,9 @@ public class Main {
         return result;
     }
 
-    /** Reads the restricted flag from PMS regulatory JSON, accepting common field names. */
-    static boolean isRestricted(JsonNode regulatory) {
-        for (String field : new String[]{"isRestricted", "restricted", "tradeRestricted", "sanctioned"}) {
-            JsonNode v = regulatory.get(field);
-            if (v != null && !v.isNull() && v.asBoolean()) return true;
-        }
-        return false;
+    static String textOrNull(JsonNode node, String field) {
+        JsonNode v = node.get(field);
+        return (v != null && !v.isNull()) ? v.asText() : null;
     }
 
     private static Map<String, Object> reject(Map<String, Object> result, String reason) {
@@ -124,3 +162,4 @@ public class Main {
         return result;
     }
 }
+
